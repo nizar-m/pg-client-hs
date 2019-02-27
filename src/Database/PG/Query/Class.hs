@@ -3,7 +3,6 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE TemplateHaskell       #-}
 {-# LANGUAGE UndecidableInstances  #-}
-
 module Database.PG.Query.Class
        ( WithCount(..)
        , WithReturning(..)
@@ -444,10 +443,10 @@ class ToBinaryEnc a where
 
 data WithOid a = WithOid PQ.Oid a
 
-instance ToBinaryEnc a => ToPrepArg (WithOid a) where
+instance {-# OVERLAPS #-} ToBinaryEnc a => ToPrepArg (WithOid a) where
   toPrepVal (WithOid oid x) = ( oid, flip (,) PQ.Binary . PE.encodingBytes <$> paBinEnc x )
 
-instance BinaryEncBuiltInTy a => ToPrepArg a where
+instance {-# OVERLAPPABLE #-} BinaryEncBuiltInTy a => ToPrepArg a where
   toPrepVal x
     = ( PTI.getElemOid paOid, flip (,) PQ.Binary . PE.encodingBytes <$> paBinaryEncM x)
     where
@@ -472,17 +471,19 @@ class ToArrBinaryEnc a b where
 instance ToBinaryEnc a => ToArrBinaryEnc (V.Vector a) (PTI.ArrOid,PTI.ElemOid) where
   paaBinEncInfo = (fst, snd, PE.dimensionArray foldl' $ maybe PE.nullArray PE.encodingArray . paBinEnc)
 
-instance {-# OVERLAPPING #-} BinaryEncBuiltInTy a => ToArrBinaryEnc (V.Vector a) (Maybe a) where
+instance BinaryEncBuiltInTy a => ToArrBinaryEnc (V.Vector a) (Maybe a) where
   paaBinEncInfo = (const arrOid, const oid, PE.dimensionArray foldl' $ maybe PE.nullArray PE.encodingArray . paBinaryEnc)
       where
         (oid,arrOid, paBinaryEnc) = btBinaryEncInfo
 
-instance ToArrBinaryEnc a b => ToArrBinaryEnc (V.Vector a) b where
-  paaBinEncInfo = (paaOid, paaArrOid, PE.dimensionArray foldl' paaBinaryEnc)
+data AsVect a = AsVect a
+
+instance ToArrBinaryEnc a b => ToArrBinaryEnc (AsVect (V.Vector a)) b where
+  paaBinEncInfo = (paaOid, paaArrOid, \(AsVect a) -> PE.dimensionArray foldl' paaBinaryEnc a)
     where
       (paaOid, paaArrOid, paaBinaryEnc) = paaBinEncInfo
 
-instance ToArrBinaryEnc a b => ToPrepArg (AsArrVal a b) where
+instance {-# OVERLAPS #-} ToArrBinaryEnc a b => ToPrepArg (AsArrVal a b) where
   toPrepVal (AsArrVal x y)
     = ( PTI.getArrOid $ oidF y
       , Just ( PE.encodingBytes $ PE.array (toWord32 $ PTI.getElemOid $ arrOidF y) (arrEncF x) , PQ.Binary)
